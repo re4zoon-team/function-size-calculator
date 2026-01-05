@@ -1,8 +1,0 @@
-README.md
-function_size_calculator.py
-pyproject.toml
-function_size_calculator.egg-info/PKG-INFO
-function_size_calculator.egg-info/SOURCES.txt
-function_size_calculator.egg-info/dependency_links.txt
-function_size_calculator.egg-info/top_level.txt
-tests/test_function_size_calculator.py
