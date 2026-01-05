@@ -5,6 +5,9 @@ target-version = "py314"
 # Maximum line length
 line-length = 120
 
+# Exclude test fixtures (intentionally incomplete code samples)
+exclude = ["tests/fixtures/*"]
+
 [tool.ruff.lint]
 # Enable specific rule categories
 select = [

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Function Size Calculator
-Scans git repositories to find the largest functions in Node.js and Java codebases.
+Scans git repositories to find the largest functions in Node.js, Java, and Python codebases.
 Outputs results to an Excel (XLSX) file with each repository on a separate tab.
 """
 
@@ -257,9 +257,103 @@ class JavaParser:
         return functions
 
 
+class PythonParser:
+    """Parser for Python functions and methods."""
+
+    # Compile regex patterns once for better performance
+    # Pattern for function definitions: def function_name(args):
+    FUNCTION_PATTERN = re.compile(r'^(\s*)def\s+(\w+)\s*\([^)]*\)\s*(?:->\s*[\w\[\],\s|]+)?\s*:')
+
+    @staticmethod
+    def parse_functions(file_path: str) -> list[FunctionInfo]:
+        """
+        Parse Python file to extract functions and methods.
+
+        Uses indentation-based tracking to determine function boundaries,
+        which is the natural way to parse Python code.
+
+        Supports:
+        - Function definitions: def function_name(args):
+        - Methods: def method_name(self, args):
+        - Async functions: async def function_name(args):
+        - Type-annotated functions: def function_name(args) -> ReturnType:
+
+        Args:
+            file_path: Path to the Python file
+
+        Returns:
+            List of FunctionInfo objects for all detected functions
+        """
+        functions = []
+
+        try:
+            with open(file_path, encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+
+            line_num = 0
+            while line_num < len(lines):
+                line = lines[line_num]
+                line_num += 1
+
+                # Check for async def first, then regular def
+                stripped = line.lstrip()
+                if stripped.startswith('async '):
+                    # Remove 'async ' prefix for pattern matching
+                    check_line = line.replace('async ', '', 1)
+                else:
+                    check_line = line
+
+                match = PythonParser.FUNCTION_PATTERN.match(check_line)
+                if match:
+                    indent = match.group(1)
+                    func_name = match.group(2)
+                    start_line = line_num
+                    base_indent_len = len(indent)
+
+                    # Find the end of the function by tracking indentation
+                    end_line = start_line
+                    last_content_line = start_line  # Track last non-blank line
+
+                    # Look for the next line at the same or lower indentation level
+                    for next_line_num in range(line_num, len(lines)):
+                        next_line = lines[next_line_num]
+
+                        # Skip empty lines and comment-only lines
+                        stripped_next = next_line.strip()
+                        if not stripped_next or stripped_next.startswith('#'):
+                            continue
+
+                        # Check indentation of non-empty, non-comment lines
+                        next_indent_len = len(next_line) - len(next_line.lstrip())
+
+                        # If we find a line with same or less indentation, the function ended
+                        if next_indent_len <= base_indent_len:
+                            break
+
+                        # This line is part of the function body
+                        last_content_line = next_line_num + 1
+
+                    # Use the last content line as the end
+                    end_line = last_content_line
+                    size = end_line - start_line + 1
+                    functions.append(FunctionInfo(
+                        name=func_name,
+                        file_path=file_path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        size=size
+                    ))
+
+        except Exception as e:
+            print(f"Warning: Could not read {file_path}: {e}")
+
+        return functions
+
+
 # Constants for test file detection
 _TEST_DIRS = {'test', 'tests', '__tests__', 'spec', 'specs'}
 _JS_TEST_PATTERNS = ('.test.', '.spec.')
+_PY_TEST_PATTERNS = ('test_', '_test.py', '_tests.py')
 
 
 def is_test_file(file_path: Path) -> bool:
@@ -272,6 +366,7 @@ def is_test_file(file_path: Path) -> bool:
     Secondary detection: Filename patterns
     - Java: Files ending with 'Test.java' or 'Tests.java' (for tests outside standard directories)
     - JavaScript/TypeScript: Files containing '.test.' or '.spec.' (common JS/TS convention)
+    - Python: Files starting with 'test_' or ending with '_test.py' or '_tests.py' (pytest conventions)
 
     Test directories detected (case-insensitive):
     - test, tests, __tests__, spec, specs
@@ -294,6 +389,10 @@ def is_test_file(file_path: Path) -> bool:
         True
         >>> is_test_file(Path("__tests__/helper.js"))
         True
+        >>> is_test_file(Path("src/test_utils.py"))
+        True
+        >>> is_test_file(Path("src/calculator_test.py"))
+        True
     """
     filename = file_path.name
     parts = file_path.parts
@@ -314,6 +413,12 @@ def is_test_file(file_path: Path) -> bool:
     # Patterns: *.test.js, *.spec.js, *.test.ts, *.spec.ts, etc.
     if any(pattern in filename for pattern in _JS_TEST_PATTERNS):
         return True
+
+    # Secondary: Check Python test filename patterns
+    # Patterns: test_*.py, *_test.py, *_tests.py (pytest conventions)
+    if filename.endswith('.py'):
+        if filename.startswith('test_') or filename.endswith('_test.py') or filename.endswith('_tests.py'):
+            return True
 
     return False
 
@@ -399,6 +504,22 @@ def scan_single_repository(repo_path: str) -> tuple[str, list[FunctionInfo]]:
                 continue
 
             functions = JavaParser.parse_functions(str(file_path))
+            # Make paths relative to repo root
+            for func in functions:
+                func.file_path = os.path.relpath(func.file_path, local_path)
+            all_functions.extend(functions)
+
+        # Find all Python files
+        for file_path in Path(local_path).rglob('*.py'):
+            # Skip common build directories using set lookup
+            if any(part in SKIP_DIRS for part in file_path.parts):
+                continue
+
+            # Skip test files
+            if is_test_file(file_path):
+                continue
+
+            functions = PythonParser.parse_functions(str(file_path))
             # Make paths relative to repo root
             for func in functions:
                 func.file_path = os.path.relpath(func.file_path, local_path)
@@ -567,7 +688,7 @@ class JSONWriter:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Find the largest functions in git repositories (Node.js and Java)'
+        description='Find the largest functions in git repositories (Node.js, Java, and Python)'
     )
     parser.add_argument(
         'repositories',
