@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -48,6 +49,189 @@ def print_progress_bar(current: int, total: int, prefix: str = '', suffix: str =
     # Print newline when complete
     if current == total:
         print()
+
+
+class ProgressBar:
+    """
+    A TUI-style progress bar that stays fixed at the bottom of the console.
+
+    Features:
+    - Fixed position at the bottom of the terminal
+    - ETA calculation that updates on each iteration
+    - Smooth updates without disrupting output above
+
+    Uses ANSI escape codes for cursor control.
+    """
+
+    # ANSI escape codes
+    SAVE_CURSOR = '\033[s'
+    RESTORE_CURSOR = '\033[u'
+    CLEAR_LINE = '\033[2K'
+    MOVE_TO_BOTTOM = '\033[{row}H'
+    SCROLL_UP = '\033[S'
+    SET_SCROLL_REGION = '\033[1;{row}r'
+    RESET_SCROLL_REGION = '\033[r'
+
+    def __init__(self, total: int, prefix: str = 'Progress:', length: int = 40):
+        """
+        Initialize the progress bar.
+
+        Args:
+            total: Total number of items to process
+            prefix: Text to display before the progress bar
+            length: Character length of the progress bar
+        """
+        self.total = total
+        self.current = 0
+        self.prefix = prefix
+        self.length = length
+        self.start_time: float | None = None
+        self._is_tty = sys.stdout.isatty()
+        self._terminal_rows = 24  # Default fallback
+
+        if self._is_tty:
+            self._setup_terminal()
+
+    def _setup_terminal(self):
+        """Set up terminal for fixed footer progress bar."""
+        try:
+            size = shutil.get_terminal_size()
+            self._terminal_rows = size.lines
+        except Exception:
+            self._terminal_rows = 24
+
+        # Set scroll region to leave bottom line for progress bar
+        sys.stdout.write(self.SET_SCROLL_REGION.format(row=self._terminal_rows - 1))
+        sys.stdout.flush()
+
+    def _format_time(self, seconds: float) -> str:
+        """Format seconds into a human-readable string."""
+        if seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{minutes}m {secs}s"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            return f"{hours}h {minutes}m"
+
+    def _calculate_eta(self) -> str:
+        """Calculate and return formatted ETA string."""
+        if self.current == 0 or self.start_time is None:
+            return "ETA: --:--"
+
+        current_time = time.time()
+        elapsed = current_time - self.start_time
+        remaining_items = self.total - self.current
+
+        # Calculate ETA based on average time per item
+        avg_time_per_item = elapsed / self.current
+        eta_seconds = remaining_items * avg_time_per_item
+
+        if eta_seconds <= 0:
+            return "ETA: 0s"
+
+        return f"ETA: {self._format_time(eta_seconds)}"
+
+    def _render_bar(self) -> str:
+        """Render the progress bar string."""
+        if self.total == 0:
+            return ""
+
+        percent = 100 * (self.current / float(self.total))
+        filled_length = int(self.length * self.current // self.total)
+        bar = '█' * filled_length + '-' * (self.length - filled_length)
+
+        eta_str = self._calculate_eta()
+        suffix = f"({self.current}/{self.total}) {eta_str}"
+
+        return f"{self.prefix} |{bar}| {percent:.1f}% {suffix}"
+
+    def start(self):
+        """Start the progress bar and record start time."""
+        self.start_time = time.time()
+        self.current = 0
+        self._render()
+
+    def update(self, current: int | None = None):
+        """
+        Update the progress bar.
+
+        Args:
+            current: New current value. If None, increments by 1.
+        """
+        if current is not None:
+            self.current = current
+        else:
+            self.current += 1
+
+        self._render()
+
+    def _render(self):
+        """Render the progress bar at the fixed bottom position."""
+        bar_str = self._render_bar()
+
+        if self._is_tty:
+            # Save cursor, move to bottom, clear line, print bar, restore cursor
+            sys.stdout.write(self.SAVE_CURSOR)
+            sys.stdout.write(self.MOVE_TO_BOTTOM.format(row=self._terminal_rows))
+            sys.stdout.write(self.CLEAR_LINE)
+            sys.stdout.write(f'\r{bar_str}')
+            sys.stdout.write(self.RESTORE_CURSOR)
+            sys.stdout.flush()
+        else:
+            # Non-TTY fallback: overwrite current line using carriage return
+            # Clear line first, then print bar
+            sys.stdout.write(f'\r\033[K{bar_str}')
+            sys.stdout.flush()
+
+    def finish(self):
+        """Complete the progress bar and cleanup terminal settings."""
+        self.current = self.total
+        self._eta_seconds = 0
+
+        if self._is_tty:
+            # Reset scroll region
+            sys.stdout.write(self.RESET_SCROLL_REGION)
+            # Move to bottom and print final bar with newline
+            sys.stdout.write(self.MOVE_TO_BOTTOM.format(row=self._terminal_rows))
+            sys.stdout.write(self.CLEAR_LINE)
+
+        bar_str = self._render_bar().replace(self._calculate_eta(), "Complete!")
+        print(f'\r{bar_str}')
+
+    def print_above(self, message: str):
+        """
+        Print a message above the progress bar.
+
+        This ensures output appears above the fixed footer.
+
+        Args:
+            message: The message to print
+        """
+        if self._is_tty:
+            # Save cursor position
+            sys.stdout.write(self.SAVE_CURSOR)
+            # Move up from bottom (into scroll region)
+            sys.stdout.write(f'\033[{self._terminal_rows - 1}H')
+            # Scroll up to make room
+            sys.stdout.write(self.SCROLL_UP)
+            # Move to where we scrolled
+            sys.stdout.write(f'\033[{self._terminal_rows - 2}H')
+            # Print the message with newline
+            print(message)
+            # Restore cursor
+            sys.stdout.write(self.RESTORE_CURSOR)
+            sys.stdout.flush()
+            # Re-render progress bar
+            self._render()
+        else:
+            # Non-TTY: clear current progress bar line and print message
+            # Then re-render progress bar on next line
+            sys.stdout.write('\r\033[K')  # Clear current line
+            print(message)  # Print message with newline
 
 
 class FunctionInfo:
@@ -797,11 +981,11 @@ def main():
     print(f"{'='*60}\n")
 
     repo_results = {}
-    completed_count = 0
     total_repos = len(repositories)
 
-    # Show initial progress bar
-    print_progress_bar(0, total_repos, prefix='Progress:', suffix='Complete')
+    # Create and start progress bar
+    progress_bar = ProgressBar(total=total_repos, prefix='Progress:')
+    progress_bar.start()
 
     # Process repositories in parallel
     with ProcessPoolExecutor(max_workers=args.jobs) as executor:
@@ -816,44 +1000,26 @@ def main():
 
                 if repo_name is not None:
                     repo_results[repo_name] = functions
-                    completed_count += 1
 
                     # Update progress bar
-                    print_progress_bar(completed_count, total_repos,
-                                     prefix='Progress:',
-                                     suffix=f'Complete ({completed_count}/{total_repos})')
+                    progress_bar.update()
 
                     # Filter by minimum size for display
                     filtered = [f for f in functions if f.size >= args.min_size]
 
-                    # Print summary for this repository
+                    # Print summary for this repository above the progress bar
                     top_n_display = sorted(filtered, key=lambda f: f.size, reverse=True)[:args.top_n]
-                    print(f"\n✓ Repository: {repo}")
-                    print(f"  Found {len(functions)} functions ({len(filtered)} >= {args.min_size} lines). Top {args.top_n} largest:")
+                    progress_bar.print_above(f"✓ Repository: {repo}")
+                    progress_bar.print_above(f"  Found {len(functions)} functions ({len(filtered)} >= {args.min_size} lines). Top {args.top_n} largest:")
                     for i, func in enumerate(top_n_display, 1):
-                        print(f"    {i}. {func.name} ({func.size} lines) - {func.file_path}")
-
-                    # Print progress bar again after summary (if not last repo)
-                    if completed_count < total_repos:
-                        print()  # Empty line before progress bar
-                        print_progress_bar(completed_count, total_repos,
-                                         prefix='Progress:',
-                                         suffix=f'Complete ({completed_count}/{total_repos})')
+                        progress_bar.print_above(f"    {i}. {func.name} ({func.size} lines) - {func.file_path}")
+                    progress_bar.print_above("")  # Empty line for spacing
             except Exception as e:
-                completed_count += 1
-                print_progress_bar(completed_count, total_repos,
-                                 prefix='Progress:',
-                                 suffix=f'Complete ({completed_count}/{total_repos})')
-                print(f"\n✗ Error processing repository {repo}: {e}")
-                if completed_count < total_repos:
-                    print()
-                    print_progress_bar(completed_count, total_repos,
-                                     prefix='Progress:',
-                                     suffix=f'Complete ({completed_count}/{total_repos})')
+                progress_bar.update()
+                progress_bar.print_above(f"✗ Error processing repository {repo}: {e}")
 
-
-    # Write results to file
-    print()  # Add blank line after progress bar
+    # Finish progress bar
+    progress_bar.finish()
     if repo_results:
         if output_format == 'json':
             JSONWriter.write_results(repo_results, args.output, args.top_n, args.min_size)

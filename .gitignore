@@ -30,3 +30,6 @@ repos.txt
 
 # Ruff cache
 .ruff_cache/
+
+# Egg info
+*.egg-info/

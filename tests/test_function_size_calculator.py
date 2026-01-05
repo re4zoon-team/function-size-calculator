@@ -19,6 +19,7 @@ from function_size_calculator import (
     JavaParser,
     JavaScriptParser,
     JSONWriter,
+    ProgressBar,
     PythonParser,
     is_test_file,
     print_progress_bar,
@@ -561,6 +562,94 @@ class TestProgressBar:
         assert "100.0%" in captured.out
         # Should end with newline when complete
         assert captured.out.endswith("\n")
+
+
+class TestProgressBarClass:
+    """Tests for the ProgressBar class (TUI-style progress bar with ETA)."""
+
+    def test_progress_bar_initialization(self):
+        """ProgressBar should initialize with correct default values."""
+        progress = ProgressBar(total=10, prefix="Test:")
+        assert progress.total == 10
+        assert progress.current == 0
+        assert progress.prefix == "Test:"
+        assert progress.start_time is None
+
+    def test_progress_bar_start(self):
+        """ProgressBar.start() should set start_time and render initial bar."""
+        progress = ProgressBar(total=5, prefix="Progress:")
+        progress.start()
+        assert progress.start_time is not None
+        assert progress.current == 0
+
+    def test_progress_bar_update_increments(self, capsys):
+        """ProgressBar.update() without argument should increment by 1."""
+        progress = ProgressBar(total=5, prefix="Progress:")
+        progress.start()
+        progress.update()
+        assert progress.current == 1
+        progress.update()
+        assert progress.current == 2
+
+    def test_progress_bar_update_with_value(self, capsys):
+        """ProgressBar.update(n) should set current to n."""
+        progress = ProgressBar(total=10, prefix="Progress:")
+        progress.start()
+        progress.update(5)
+        assert progress.current == 5
+        progress.update(8)
+        assert progress.current == 8
+
+    def test_progress_bar_eta_format(self):
+        """ProgressBar should format ETA correctly."""
+        progress = ProgressBar(total=10, prefix="Progress:")
+        # Test seconds formatting
+        assert progress._format_time(30) == "30s"
+        assert progress._format_time(59) == "59s"
+        # Test minutes formatting
+        assert progress._format_time(60) == "1m 0s"
+        assert progress._format_time(90) == "1m 30s"
+        assert progress._format_time(3599) == "59m 59s"
+        # Test hours formatting
+        assert progress._format_time(3600) == "1h 0m"
+        assert progress._format_time(7200) == "2h 0m"
+        assert progress._format_time(5400) == "1h 30m"
+
+    def test_progress_bar_render_bar(self, capsys):
+        """ProgressBar should render bar with correct percentage."""
+        progress = ProgressBar(total=10, prefix="Test:", length=20)
+        progress.start()
+        progress.current = 5
+        bar_str = progress._render_bar()
+        assert "50.0%" in bar_str
+        assert "Test:" in bar_str
+        assert "(5/10)" in bar_str
+
+    def test_progress_bar_finish(self, capsys):
+        """ProgressBar.finish() should set current to total and print Complete."""
+        progress = ProgressBar(total=5, prefix="Progress:")
+        progress.start()
+        progress.update(3)
+        progress.finish()
+        captured = capsys.readouterr()
+        assert progress.current == 5
+        assert "Complete!" in captured.out
+
+    def test_progress_bar_print_above(self, capsys):
+        """ProgressBar.print_above() should print message."""
+        progress = ProgressBar(total=5, prefix="Progress:")
+        progress.start()
+        progress.print_above("Test message")
+        captured = capsys.readouterr()
+        assert "Test message" in captured.out
+
+    def test_progress_bar_zero_total(self):
+        """ProgressBar should handle zero total gracefully."""
+        progress = ProgressBar(total=0, prefix="Progress:")
+        progress.start()
+        bar_str = progress._render_bar()
+        # Should return empty string for zero total
+        assert bar_str == ""
 
 
 class TestEmptyResults:
