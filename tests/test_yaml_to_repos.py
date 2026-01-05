@@ -37,6 +37,27 @@ class TestLoadReposFromYaml:
         assert urls[0] == "https://gitlab.local/services/spring-boot-template"
         assert urls[1] == "https://gitlab.local/services/spring-boot"
 
+    def test_load_yaml_with_empty_url(self, tmp_path: Path):
+        """Should skip entries with empty or None URL values."""
+        yaml_content = """
+- name: repo-with-url
+  url: https://gitlab.local/services/repo-with-url
+  product: Devops
+- name: repo-with-empty-url
+  url: ""
+  product: Devops
+- name: repo-with-null-url
+  url: null
+  product: Devops
+"""
+        yaml_file = tmp_path / "repos.yaml"
+        yaml_file.write_text(yaml_content)
+
+        urls = load_repos_from_yaml(str(yaml_file))
+
+        assert len(urls) == 1
+        assert urls[0] == "https://gitlab.local/services/repo-with-url"
+
     def test_load_yaml_with_missing_url(self, tmp_path: Path):
         """Should skip entries without URL field."""
         yaml_content = """

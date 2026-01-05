@@ -39,7 +39,9 @@ def load_repos_from_yaml(yaml_file: str) -> list[str]:
     urls = []
     for repo in data:
         if isinstance(repo, dict) and 'url' in repo:
-            urls.append(repo['url'])
+            url = repo['url']
+            if url:  # Skip None or empty URL values
+                urls.append(url)
 
     return urls
 
