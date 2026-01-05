@@ -124,6 +124,22 @@ EOF
 python function_size_calculator.py -i repos.txt
 ```
 
+1. Extract repository URLs from a YAML file:
+
+```bash
+# If you have a YAML file with repository information:
+# - name: spring-boot-template
+#   url: https://gitlab.local/services/spring-boot-template
+#   product: Devops
+#   type: springboot
+
+# Use yaml_to_repos.py to extract URLs to repos.txt
+python yaml_to_repos.py repos.yaml -o repos.txt
+
+# Then scan using the generated repos.txt
+python function_size_calculator.py -i repos.txt
+```
+
 1. Specify custom output file:
 
 ```bash
@@ -182,6 +198,31 @@ python function_size_calculator.py -i repos.txt -f json -o results.json
 - `-n`, `--top-n`: Number of top largest functions to report per repository (default: 5)
 - `-m`, `--min-size`: Minimum function size in lines to include (default: 1)
 - `-h`, `--help`: Show help message
+
+### YAML to repos.txt Converter (yaml_to_repos.py)
+
+If you have repository information in a YAML file, use `yaml_to_repos.py` to extract the URLs:
+
+```bash
+python yaml_to_repos.py repos.yaml -o repos.txt
+```
+
+**Expected YAML structure:**
+
+```yaml
+- name: spring-boot-template
+  url: https://gitlab.local/services/spring-boot-template
+  product: Devops
+  type: springboot
+- name: spring-boot
+  url: https://gitlab.local/services/spring-boot
+  product: Devops
+  type: springboot
+```
+
+**Options:**
+- `yaml_file`: Path to the YAML file containing repository information (required)
+- `-o`, `--output`: Output file name (default: `repos.txt`)
 
 ## Output Formats
 
