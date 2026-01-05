@@ -262,15 +262,16 @@ class PythonParser:
 
     # Compile regex patterns once for better performance
     # Pattern for function definitions: def function_name(args):
-    FUNCTION_PATTERN = re.compile(r'^(\s*)def\s+(\w+)\s*\([^)]*\)\s*(?:->\s*[\w\[\],\s|]+)?\s*:')
+    # Uses a more flexible pattern for return type annotations to handle complex types
+    FUNCTION_PATTERN = re.compile(r'^(\s*)def\s+(\w+)\s*\([^)]*\)\s*(?:->[^:]+)?\s*:')
 
     @staticmethod
     def parse_functions(file_path: str) -> list[FunctionInfo]:
         """
         Parse Python file to extract functions and methods.
 
-        Uses indentation-based tracking to determine function boundaries,
-        which is the natural way to parse Python code.
+        Uses a streaming approach with indentation-based tracking to determine
+        function boundaries, which is memory-efficient and natural for Python.
 
         Supports:
         - Function definitions: def function_name(args):
@@ -288,59 +289,62 @@ class PythonParser:
 
         try:
             with open(file_path, encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
+                line_num = 0
+                # Stack of (func_name, start_line, base_indent_len, last_content_line)
+                function_stack = []
 
-            line_num = 0
-            while line_num < len(lines):
-                line = lines[line_num]
-                line_num += 1
+                for line in f:  # Stream file line by line
+                    line_num += 1
 
-                # Check for async def first, then regular def
-                stripped = line.lstrip()
-                if stripped.startswith('async '):
-                    # Remove 'async ' prefix for pattern matching
-                    check_line = line.replace('async ', '', 1)
-                else:
+                    # Check if any active function has ended
+                    stripped = line.strip()
+                    is_content_line = stripped and not stripped.startswith('#')
+
+                    if is_content_line:
+                        current_indent_len = len(line) - len(line.lstrip())
+
+                        # Check functions in reverse order (most nested first)
+                        # and finalize any that have ended
+                        new_stack = []
+                        for func_name, start_line, base_indent_len, last_content_line in function_stack:
+                            if current_indent_len <= base_indent_len:
+                                # This function has ended
+                                size = last_content_line - start_line + 1
+                                functions.append(FunctionInfo(
+                                    name=func_name,
+                                    file_path=file_path,
+                                    start_line=start_line,
+                                    end_line=last_content_line,
+                                    size=size
+                                ))
+                            else:
+                                # Update last content line
+                                new_stack.append((func_name, start_line, base_indent_len, line_num))
+                        function_stack = new_stack
+
+                    # Check for async def first, then regular def
                     check_line = line
+                    if stripped.startswith('async '):
+                        # Remove 'async ' prefix for pattern matching
+                        check_line = line.replace('async ', '', 1)
 
-                match = PythonParser.FUNCTION_PATTERN.match(check_line)
-                if match:
-                    indent = match.group(1)
-                    func_name = match.group(2)
-                    start_line = line_num
-                    base_indent_len = len(indent)
+                    match = PythonParser.FUNCTION_PATTERN.match(check_line)
+                    if match:
+                        indent = match.group(1)
+                        func_name = match.group(2)
+                        base_indent_len = len(indent)
 
-                    # Find the end of the function by tracking indentation
-                    end_line = start_line
-                    last_content_line = start_line  # Track last non-blank line
+                        # Add to stack to track
+                        function_stack.append((func_name, line_num, base_indent_len, line_num))
 
-                    # Look for the next line at the same or lower indentation level
-                    for next_line_num in range(line_num, len(lines)):
-                        next_line = lines[next_line_num]
-
-                        # Skip empty lines and comment-only lines
-                        stripped_next = next_line.strip()
-                        if not stripped_next or stripped_next.startswith('#'):
-                            continue
-
-                        # Check indentation of non-empty, non-comment lines
-                        next_indent_len = len(next_line) - len(next_line.lstrip())
-
-                        # If we find a line with same or less indentation, the function ended
-                        if next_indent_len <= base_indent_len:
-                            break
-
-                        # This line is part of the function body
-                        last_content_line = next_line_num + 1
-
-                    # Use the last content line as the end
-                    end_line = last_content_line
-                    size = end_line - start_line + 1
+                # Finalize any functions that extend to the end of the file
+                for func_name, start_line, base_indent_len, last_content_line in function_stack:
+                    size = last_content_line - start_line + 1
                     functions.append(FunctionInfo(
                         name=func_name,
                         file_path=file_path,
                         start_line=start_line,
-                        end_line=end_line,
+                        end_line=last_content_line,
                         size=size
                     ))
 
