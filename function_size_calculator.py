@@ -86,8 +86,6 @@ class ProgressBar:
         self.prefix = prefix
         self.length = length
         self.start_time: float | None = None
-        self._last_eta_update: float = 0
-        self._eta_seconds: float | None = None
         self._is_tty = sys.stdout.isatty()
         self._terminal_rows = 24  # Default fallback
 
@@ -97,8 +95,7 @@ class ProgressBar:
     def _setup_terminal(self):
         """Set up terminal for fixed footer progress bar."""
         try:
-            import shutil as sh
-            size = sh.get_terminal_size()
+            size = shutil.get_terminal_size()
             self._terminal_rows = size.lines
         except Exception:
             self._terminal_rows = 24
@@ -132,10 +129,6 @@ class ProgressBar:
         # Calculate ETA based on average time per item
         avg_time_per_item = elapsed / self.current
         eta_seconds = remaining_items * avg_time_per_item
-
-        # Update stored ETA
-        self._eta_seconds = eta_seconds
-        self._last_eta_update = current_time
 
         if eta_seconds <= 0:
             return "ETA: 0s"
@@ -227,8 +220,8 @@ class ProgressBar:
             sys.stdout.write(self.SCROLL_UP)
             # Move to where we scrolled
             sys.stdout.write(f'\033[{self._terminal_rows - 2}H')
-            # Print the message
-            print(message, end='')
+            # Print the message with newline
+            print(message)
             # Restore cursor
             sys.stdout.write(self.RESTORE_CURSOR)
             sys.stdout.flush()
