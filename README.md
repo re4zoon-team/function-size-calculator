@@ -1,12 +1,12 @@
 # Function Size Calculator
 
-A Python tool that scans git repositories to find the largest functions in Java and Node.js codebases. The results are exported to an Excel (XLSX) or JSON file with each repository on a separate tab.
+A Python tool that scans git repositories to find the largest functions in Java, Node.js, and Python codebases. The results are exported to an Excel (XLSX) or JSON file with each repository on a separate tab.
 
 ## Features
 
 - Scans multiple git repositories (local or remote)
 - **Parallel processing** for efficient scanning of multiple repositories
-- Supports Node.js (JavaScript, TypeScript) and Java
+- Supports Node.js (JavaScript, TypeScript), Java, and Python
 - **Memory-efficient streaming** handles very large files without loading entire files into memory
 - **Multiple output formats**: Excel (XLSX) and JSON
 - **Configurable number of top functions** to report (default: 5)
@@ -249,6 +249,14 @@ To use JSON format, either:
 - Methods with various modifiers: `public static void method() {}`
 - Supports: `.java` files
 
+### Python
+
+- Function definitions: `def function_name():`
+- Methods: `def method_name(self):`
+- Async functions: `async def function_name():`
+- Type-annotated functions: `def function_name(arg: str) -> str:`
+- Supports: `.py` files
+
 ## How It Works
 
 1. **Repository Access**: Clones remote repositories to temporary directories or uses local paths
@@ -262,9 +270,11 @@ To use JSON format, either:
    - **Secondary method**: Filename pattern matching (for edge cases)
      - Java: Files ending with `Test.java` or `Tests.java`
      - JavaScript/TypeScript: Files containing `.test.` or `.spec.`
-5. **Function Parsing**: Uses streaming parsers with regex patterns and brace-tracking to identify function/method declarations
+     - Python: Files starting with `test_` or ending with `_test.py` or `_tests.py`
+5. **Function Parsing**: Uses streaming parsers with regex patterns and brace/indentation tracking to identify function/method declarations
    - **Memory-Efficient**: Processes files line-by-line without loading entire files into memory, allowing analysis of very large files
    - **JavaScript/TypeScript/Java**: Counts lines by tracking brace pairs `{}`
+   - **Python**: Counts lines by tracking indentation levels
 6. **Size Calculation**: Counts lines from function start to end
 7. **Filtering**: Applies minimum size filter to exclude trivial functions
 8. **Ranking**: Sorts functions by line count and selects top N per repository
@@ -293,15 +303,18 @@ To use JSON format, either:
 | **JSON Writer** | 5 | ✅ All Passed |
 | **Java Parser** | 4 | ✅ All Passed |
 | **JavaScript/TypeScript Parser** | 5 | ✅ All Passed |
+| **Python Parser** | 5 | ✅ All Passed |
 | **Repository Scanner** | 3 | ✅ All Passed |
-| **Total** | **27** | **✅ 27 Passed** |
+| **Test File Detection** | 13 | ✅ All Passed |
+| **Test File Exclusion** | 4 | ✅ All Passed |
+| **Total** | **54** | **✅ 54 Passed** |
 
 ### Performance
 
-- **Execution Time**: 0.17 seconds
+- **Execution Time**: ~0.21 seconds
 - **Platform**: Linux, Python 3.12.3, pytest 9.0.2
 
-*Last updated: 2025-12-27 04:41:04 UTC*
+*Last updated: 2026-01-05*
 
 ## License
 

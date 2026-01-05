@@ -19,6 +19,7 @@ from function_size_calculator import (
     JavaParser,
     JavaScriptParser,
     JSONWriter,
+    PythonParser,
     is_test_file,
     print_progress_bar,
     scan_single_repository,
@@ -165,6 +166,59 @@ class TestJavaParser:
             functions = JavaParser.parse_functions("/nonexistent/Sample.java")
 
         assert len(functions) == 0
+
+
+class TestPythonParser:
+    """Tests for PythonParser."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, fixtures_dir: Path):
+        self.py_file = fixtures_dir / "sample.py"
+
+    def test_parse_python_file(self):
+        functions = PythonParser.parse_functions(str(self.py_file))
+
+        assert len(functions) > 0
+
+        func_names = [f.name for f in functions]
+        assert "simple_function" in func_names
+        assert "large_function" in func_names
+        assert "async_function" in func_names
+        assert "typed_function" in func_names
+        assert "outer_function" in func_names
+
+    def test_python_class_methods(self):
+        functions = PythonParser.parse_functions(str(self.py_file))
+        func_names = [f.name for f in functions]
+
+        assert "method_in_class" in func_names
+        assert "another_method" in func_names
+        assert "async_method" in func_names
+
+    def test_python_function_size(self):
+        functions = PythonParser.parse_functions(str(self.py_file))
+
+        simple = next((f for f in functions if f.name == "simple_function"), None)
+        assert simple is not None
+        assert simple.size == 2
+
+        large = next((f for f in functions if f.name == "large_function"), None)
+        assert large is not None
+        assert large.size > simple.size
+
+    def test_parse_nonexistent_python_file(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            functions = PythonParser.parse_functions("/nonexistent/sample.py")
+
+        assert len(functions) == 0
+
+    def test_python_function_line_numbers(self):
+        functions = PythonParser.parse_functions(str(self.py_file))
+
+        for func in functions:
+            assert func.start_line > 0
+            assert func.end_line >= func.start_line
+            assert func.size > 0
 
 
 class TestExcelWriter:
@@ -421,6 +475,12 @@ public class Sample {
 """
     (src_dir / "Sample.java").write_text(java_content)
 
+    python_content = """
+def python_function():
+    print("hello")
+"""
+    (src_dir / "sample.py").write_text(python_content)
+
     return repo_dir
 
 
@@ -436,6 +496,7 @@ class TestScanRepository:
         func_names = [f.name for f in functions]
         assert "testFunc" in func_names
         assert "testMethod" in func_names
+        assert "python_function" in func_names
 
     def test_scan_nonexistent_repository(self):
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
@@ -607,6 +668,33 @@ class TestIsTestFile:
         assert is_test_file(Path("src/main/java/com/example/Calculator.java")) is False
         assert is_test_file(Path("src/main/java/com/example/Service.java")) is False
 
+    def test_python_test_file_with_test_prefix(self):
+        """Should identify Python files starting with test_ as test files."""
+        assert is_test_file(Path("/src/test_utils.py")) is True
+        assert is_test_file(Path("/src/test_calculator.py")) is True
+        assert is_test_file(Path("/src/test_main.py")) is True
+
+    def test_python_test_file_with_test_suffix(self):
+        """Should identify Python files ending with _test.py or _tests.py as test files."""
+        assert is_test_file(Path("/src/calculator_test.py")) is True
+        assert is_test_file(Path("/src/utils_test.py")) is True
+        assert is_test_file(Path("/src/calculator_tests.py")) is True
+        assert is_test_file(Path("/src/utils_tests.py")) is True
+
+    def test_python_non_test_file(self):
+        """Should not identify regular Python files as test files."""
+        assert is_test_file(Path("/src/calculator.py")) is False
+        assert is_test_file(Path("/src/utils.py")) is False
+        assert is_test_file(Path("/src/main.py")) is False
+        # testing_utils.py should NOT be a test file (it's a utility module)
+        assert is_test_file(Path("/src/testing_utils.py")) is False
+
+    def test_python_file_in_test_directory(self):
+        """Should identify Python files in test directories as test files."""
+        assert is_test_file(Path("/src/tests/test_calculator.py")) is True
+        assert is_test_file(Path("/src/tests/conftest.py")) is True
+        assert is_test_file(Path("/src/tests/helper.py")) is True
+
 
 class TestExcludeTestFiles:
     """Tests for ensuring test files are excluded from repository scanning."""
@@ -726,3 +814,44 @@ const testMultiply = () => {
 
         # Should NOT have functions from files in tests directory
         assert not any("tests" in Path(f).parts for f in func_files)
+
+    def test_exclude_python_test_files(self, tmp_path: Path):
+        """Should exclude Python test files from scanning."""
+        repo_dir = tmp_path / "python_repo"
+        src_dir = repo_dir / "src"
+        src_dir.mkdir(parents=True)
+
+        # Create a regular source file
+        source_content = """
+def calculate(a, b):
+    return a + b
+
+def multiply(a, b):
+    return a * b
+"""
+        (src_dir / "utils.py").write_text(source_content)
+
+        # Create test files that should be excluded
+        test_content = """
+def test_calculate():
+    assert calculate(2, 3) == 5
+
+def test_multiply():
+    assert multiply(2, 3) == 6
+"""
+        (src_dir / "test_utils.py").write_text(test_content)
+        (src_dir / "utils_test.py").write_text(test_content)
+
+        # Scan the repository
+        repo_name, functions = scan_single_repository(str(repo_dir))
+
+        # Should find functions from utils.py but not from test files
+        assert repo_name is not None
+        func_files = [f.file_path for f in functions]
+
+        # Should have functions from utils.py
+        assert any("utils.py" in f and "test_" not in f and "_test.py" not in f for f in func_files)
+
+        # Should NOT have functions from test files
+        assert not any("test_utils.py" in f for f in func_files)
+        assert not any("utils_test.py" in f for f in func_files)
